@@ -1,0 +1,30 @@
+# Python cache and local environments
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+env/
+
+# Local secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+.claude/
+.mcp.json
+config/*.db
+config/*.sqlite
+config/*.sqlite3
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated output and large media artifacts
+outputs/
+*.mp4
+*.wav
+
+# Logs and OS files
+*.log
+.DS_Store
+Thumbs.db

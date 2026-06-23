@@ -1,0 +1,7 @@
+streamlit>=1.32
+pillow>=10.0
+opencv-python>=4.8
+numpy>=1.26
+imageio-ffmpeg>=0.4.9
+mcp>=1.0.0
+langgraph>=1.2.0
