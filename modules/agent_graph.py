@@ -13,11 +13,9 @@ from .pipeline import _slug
 from .script_generator import generate_plan, generate_plan_with_llm, plan_to_markdown
 from .subtitle_generator import write_ass, write_srt
 from .tts_client import TTSError, synthesize_siliconflow_speech
-from .material_manager import find_local_video_assets
 from .vector_store import VectorStore
 from .video_editor import build_video_from_mixed_assets, mux_audio
 from .video_generation import VideoGenerationError, generate_scene_video
-from .visual_generator import render_all_scene_images
 from .voice_generator import synthesize_voice
 
 
@@ -140,7 +138,6 @@ def write_artifacts(state: ShortVideoState) -> ShortVideoState:
     audio_path = project_dir / "voiceover.wav"
     silent_video_path = project_dir / "silent_video.mp4"
     final_video_path = project_dir / "final_video.mp4"
-    scenes_dir = project_dir / "scenes"
     reference_dir = project_dir / "image"
     clips_dir = project_dir / "generated_clips"
 
@@ -148,28 +145,26 @@ def write_artifacts(state: ShortVideoState) -> ShortVideoState:
     md_path.write_text(plan_to_markdown(plan), encoding="utf-8")
     write_srt(plan, srt_path)
     write_ass(plan, ass_path)
-    fallback_images = render_all_scene_images(plan, scenes_dir)
     config = load_config()
     api_status = {}
     image_config = config.get("image_model", {})
-    images = fallback_images
     image_results = []
-    if image_config.get("enabled"):
-        generated_images = []
-        for scene, fallback in zip(plan["scenes"], fallback_images):
-            out_img = reference_dir / f"scene_{scene['index']:02d}.png"
-            try:
-                img = generate_image(scene.get("image_prompt") or scene.get("visual", ""), out_img, image_config)
-                scene["reference_image"] = str(img.resolve())
-                generated_images.append(img)
-                image_results.append({"scene": scene["index"], "status": "ok", "path": str(img.resolve())})
-            except ImageGenerationError as exc:
-                generated_images.append(fallback)
-                image_results.append({"scene": scene["index"], "status": "failed", "error": str(exc)})
-        images = generated_images
-        plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
-    else:
-        image_results = "disabled"
+    if not image_config.get("enabled"):
+        raise RuntimeError("Image generation model is disabled; video composition now requires model-generated images.")
+
+    images = []
+    for scene in plan["scenes"]:
+        out_img = reference_dir / f"scene_{scene['index']:02d}.png"
+        try:
+            img = generate_image(scene.get("image_prompt") or scene.get("visual", ""), out_img, image_config)
+            scene["reference_image"] = str(img.resolve())
+            images.append(img)
+            image_results.append({"scene": scene["index"], "status": "ok", "path": str(img.resolve())})
+        except ImageGenerationError as exc:
+            image_results.append({"scene": scene["index"], "status": "failed", "error": str(exc)})
+            api_status["image_generation"] = image_results
+            raise RuntimeError(f"Image generation failed for scene {scene['index']}; local visual fallback is disabled.") from exc
+    plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
     api_status["image_generation"] = image_results
     tts_config = config.get("tts_model", {})
     if tts_config.get("enabled"):
@@ -205,14 +200,6 @@ def write_artifacts(state: ShortVideoState) -> ShortVideoState:
     else:
         api_status["video_generation"] = "disabled"
 
-    for scene in plan["scenes"]:
-        idx = int(scene["index"])
-        if idx not in scene_videos:
-            assets = find_local_video_assets(scene.get("asset_keyword", ""), limit=1)
-            if assets:
-                scene_videos[idx] = assets[0]
-                scene["local_video_asset"] = str(assets[0].resolve())
-
     build_video_from_mixed_assets(plan, images, scene_videos, silent_video_path)
     final_video, audio_muxed = mux_audio(silent_video_path, audio_path, final_video_path, subtitle_path=ass_path)
 
@@ -224,7 +211,6 @@ def write_artifacts(state: ShortVideoState) -> ShortVideoState:
         "voiceover": str(audio_path.resolve()),
         "silent_video": str(silent_video_path.resolve()),
         "final_video": str(final_video.resolve()),
-            "scene_images_dir": str(scenes_dir.resolve()),
             "reference_images_dir": str(reference_dir.resolve()),
             "generated_clips_dir": str(clips_dir.resolve()),
         }
